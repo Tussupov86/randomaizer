@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="logo.png">
+<style>*,*::before,*::after{box-sizing:border-box}body{margin:0}img{max-width:100%}</style>
+<title>Колесо АЮ READY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=Manrope:wght@400;600;700;800&display=swap">
+<style>
+/* Layout: сцена с колесом слева, пульт ведущего справа; «режим показа» прячет пульт для записи сторис */
+:root{
+  --bg:#120c1d; --bg2:#1d1430; --panel:#1a1229; --line:#34284a;
+  --fg:#f6f0ff; --muted:#a898c4; --gold:#ffc21a; --gold2:#ff9a00; --hot:#ff4d7d;
+  --display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(60% 50% at 35% 45%,rgba(255,159,28,.16),transparent 70%),radial-gradient(50% 50% at 80% 10%,rgba(255,77,125,.12),transparent 70%);}
+.app{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:28px;max-width:1280px;margin:0 auto;padding-block:24px;padding-inline:16px;min-height:100%;box-sizing:border-box;align-items:start}
+.app.show{grid-template-columns:minmax(0,1fr)}
+.app.show .panel{display:none}
+@media (max-width:900px){.app{grid-template-columns:minmax(0,1fr)}}
+
+.stage{display:flex;flex-direction:column;align-items:center;gap:18px;min-width:0}
+.brand{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center}
+.brand .eyebrow{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.brand h1{margin:0;font-family:var(--display);font-weight:900;font-size:clamp(26px,4.4vw,46px);line-height:1;letter-spacing:-.01em;text-wrap:balance}
+.brand h1 span{color:var(--gold)}
+.prize-line{font-size:15px;color:var(--fg);min-height:1.3em;font-weight:700}
+.prize-line b{color:var(--gold)}
+
+.wheel-wrap{position:relative;width:min(100%,640px,76vh);aspect-ratio:1;max-width:100%}
+.app.show .wheel-wrap{width:min(100%,820px,82vh)}
+.wheel-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.pointer{position:absolute;left:50%;top:-2.5%;width:9%;aspect-ratio:.8;transform-origin:50% 22%;transform:translateX(-50%) rotate(0deg);z-index:3;filter:drop-shadow(0 6px 8px rgba(0,0,0,.5));transition:transform .18s cubic-bezier(.3,1.6,.5,1)}
+.pointer.kick{transition:none}
+.hub{position:absolute;left:50%;top:50%;width:27%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;z-index:2;cursor:pointer;border:0;padding:0;
+  background:radial-gradient(circle at 35% 30%,#2e2146,#130c1f 70%);
+  box-shadow:0 0 0 5px var(--gold),0 0 0 9px #7a4a05,0 10px 30px rgba(0,0,0,.6),inset 0 2px 12px rgba(255,255,255,.08);
+  display:grid;place-items:center;overflow:hidden;color:var(--fg);transition:transform .2s}
+.hub:hover{transform:translate(-50%,-50%) scale(1.04)}
+.hub:focus-visible{outline:3px solid var(--hot);outline-offset:8px}
+.hub.has-img{background:radial-gradient(circle at 40% 35%,#ffffff,#fff4d6 75%,#ffe6a0)}
+.hub img{width:88%;height:88%;object-fit:contain}
+.hub .logo-text{font-family:var(--display);line-height:.92;text-align:center;font-weight:900;font-size:clamp(11px,2.3vw,24px)}
+.hub .logo-text .a{color:var(--gold);font-size:1.5em;display:block}
+.hub .logo-text .r{display:block;letter-spacing:.06em}
+.hub .logo-text .k{display:block;font-size:.62em;color:var(--muted);letter-spacing:.3em;margin-top:.3em}
+.wheel-wrap.spinning .hub{cursor:default}
+.wheel-wrap.spinning .hub:hover{transform:translate(-50%,-50%)}
+
+.spin-btn{font-family:var(--display);font-weight:900;font-size:clamp(18px,2.4vw,24px);letter-spacing:.08em;color:#2a1600;border:0;border-radius:999px;padding:16px 44px;cursor:pointer;
+  background:linear-gradient(180deg,#ffe07a,var(--gold) 45%,var(--gold2));box-shadow:0 6px 0 #9a5a00,0 14px 30px rgba(255,159,28,.35);transition:transform .1s,box-shadow .1s,filter .2s}
+.spin-btn:hover{filter:brightness(1.06)}
+.spin-btn:active{transform:translateY(4px);box-shadow:0 2px 0 #9a5a00,0 8px 20px rgba(255,159,28,.3)}
+.spin-btn:disabled{filter:grayscale(.7) brightness(.7);cursor:not-allowed;transform:none}
+.spin-btn:focus-visible{outline:3px solid var(--hot);outline-offset:4px}
+.stage-tools{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:18px;min-width:0}
+.panel h2{margin:0;font-family:var(--display);font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.sec{display:flex;flex-direction:column;gap:8px}
+.sec-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.count{font-variant-numeric:tabular-nums;color:var(--gold);font-weight:800;font-size:13px}
+.hint{color:var(--muted);font-size:12.5px;line-height:1.45;margin:0}
+textarea,input[type=text],input[type=number],select{width:100%;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:14px}
+textarea{min-height:190px;resize:vertical;line-height:1.5}
+textarea:focus,input:focus,select:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:transparent}
+textarea:disabled{opacity:.6}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row > input[type=number]{width:80px;flex:0 0 auto}
+.btn{background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:background .15s,border-color .15s}
+.btn:hover{border-color:var(--gold)}
+.btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.4;cursor:not-allowed;border-color:var(--line)}
+.btn.danger:hover{border-color:var(--hot);color:var(--hot)}
+.check{display:flex;gap:10px;align-items:center;font-size:14px;cursor:pointer}
+.check input{width:18px;height:18px;accent-color:var(--gold)}
+.hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto}
+.hist li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:8px 10px;background:var(--bg);border-radius:10px;font-size:13.5px}
+.hist .n{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
+.hist .who{font-weight:800;overflow-wrap:anywhere}
+.hist .who small{display:block;color:var(--muted);font-weight:600}
+.hist .t{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);font-size:13px}
+
+/* победитель */
+.modal{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:16px;background:rgba(8,4,14,.72);backdrop-filter:blur(4px)}
+.card{position:relative;width:min(560px,100%);box-sizing:border-box;text-align:center;padding:36px 24px 26px;border-radius:24px;background:linear-gradient(180deg,#2a1c43,#170f26);border:2px solid var(--gold);box-shadow:0 0 0 6px rgba(255,207,74,.12),0 30px 80px rgba(0,0,0,.6),0 0 90px rgba(255,159,28,.35);animation:pop .6s cubic-bezier(.2,1.5,.4,1)}
+@keyframes pop{from{transform:scale(.4) rotate(-6deg);opacity:0}to{transform:none;opacity:1}}
+.card .eyebrow{font-family:var(--display);font-size:13px;letter-spacing:.35em;color:var(--gold);font-weight:700}
+.card .winner{font-family:var(--display);font-weight:900;font-size:clamp(30px,8vw,64px);line-height:1.05;margin:14px 0 8px;overflow-wrap:anywhere;
+  background:linear-gradient(180deg,#fff,#ffe07a 60%,var(--gold2));-webkit-background-clip:text;background-clip:text;color:transparent;animation:glow 1.6s ease-in-out infinite alternate}
+@keyframes glow{from{filter:drop-shadow(0 0 6px rgba(255,207,74,.3))}to{filter:drop-shadow(0 0 22px rgba(255,207,74,.8))}}
+.card .prz{color:var(--fg);font-weight:700;font-size:16px;min-height:1em}
+.card .actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:22px}
+.card .btn{padding:11px 18px;font-size:14px}
+.card .btn.primary{background:var(--gold);color:#2a1600;border-color:var(--gold)}
+#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:30}
+.flash{position:fixed;inset:0;pointer-events:none;z-index:19;background:radial-gradient(circle at 50% 45%,rgba(255,230,140,.55),transparent 60%);animation:flash .9s ease-out forwards}
+@keyframes flash{from{opacity:1}to{opacity:0}}
+body.screen .panel,body.screen .stage-tools,body.screen .spin-btn,body.screen .cast-hint,body.screen .card .actions{display:none!important}
+body.screen .app{grid-template-columns:minmax(0,1fr);padding-block:2vh}
+body.screen .wheel-wrap{width:min(100%,calc(100vh - 20vh - 60px))}
+body.screen .hub{cursor:default}
+body.screen .brand h1{font-size:clamp(28px,5vh,60px)}
+body.screen .prize-line{font-size:clamp(16px,2.6vh,28px)}
+.cast-hint{margin:0;text-align:center;max-width:46ch}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#3ee08f}
+.live::before{content:"";width:8px;height:8px;border-radius:50%;background:#3ee08f;box-shadow:0 0 8px #3ee08f}
+.fs-hint{position:fixed;left:50%;bottom:3vh;transform:translateX(-50%);z-index:40;pointer-events:none;padding:12px 22px;border-radius:999px;background:rgba(0,0,0,.55);border:1px solid var(--line);font-family:var(--display);font-weight:700;font-size:clamp(14px,2.2vh,22px);white-space:nowrap;animation:hintPulse 2s ease-in-out infinite}
+@keyframes hintPulse{50%{opacity:.55}}
+body.screen{user-select:none;-webkit-user-select:none}
+body.screen.idle,body.screen.idle *{cursor:none!important}
+.cast-msg{margin:0;text-align:center;font-size:13px;font-weight:700;color:var(--gold);min-height:1em;max-width:52ch}
+@media (prefers-reduced-motion:reduce){.card,.card .winner{animation:none}.flash{display:none}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <section class="stage">
+    <div class="brand">
+      <div class="eyebrow">Розыгрыш призов</div>
+      <h1><span>АЮ</span> READY КВИЗ</h1>
+      <div class="prize-line" id="prizeLine"></div>
+    </div>
+    <div class="wheel-wrap" id="wrap">
+      <svg class="pointer" id="pointer" viewBox="0 0 40 50" aria-hidden="true">
+        <defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3b8"/><stop offset=".5" stop-color="#ffcf4a"/><stop offset="1" stop-color="#e07b00"/></linearGradient></defs>
+        <path d="M20 49 L3 14 A17 17 0 1 1 37 14 Z" fill="url(#pg)" stroke="#6b3d00" stroke-width="2"/>
+        <circle cx="20" cy="12" r="5" fill="#ff4d7d" stroke="#6b3d00" stroke-width="1.5"/>
+      </svg>
+      <canvas id="wheel"></canvas>
+      <button class="hub" id="hub" aria-label="Крутить колесо">
+        <div class="logo-text" id="logoText"><span class="a">АЮ</span><span class="r">READY</span><span class="k">КВИЗ</span></div>
+      </button>
+    </div>
+    <button class="spin-btn" id="spin">КРУТИТЬ!</button>
+    <div class="stage-tools">
+      <button class="btn ghost" id="showMode">Режим показа на 2-м экране</button>
+      <button class="btn ghost" id="closeScreen" hidden>Закрыть трансляцию</button>
+      <button class="btn ghost" id="hidePanel">Скрыть пульт</button>
+      <button class="btn ghost" id="fsBtn">На весь экран</button>
+      <button class="btn ghost" id="soundBtn">Звук: вкл</button>
+      <span class="live" id="screenStatus" hidden>Экран трансляции подключён</span>
+    </div>
+    <p class="cast-msg" id="castMsg"></p>
+    <p class="hint cast-hint">«Режим показа» сам откроет колесо во весь экран на втором мониторе (Chrome или Edge). В первый раз браузер спросит разрешение на управление окнами — нажми «Разрешить». Крутишь отсюда.</p>
+  </section>
+
+  <aside class="panel">
+    <div class="sec">
+      <div class="sec-head"><h2>Участники</h2><span class="count" id="count">0</span></div>
+      <textarea id="names" spellcheck="false" placeholder="Каждый участник с новой строки"></textarea>
+      <p class="hint">Никнеймы, номера или команды, по одному на строку. Можно вставить списком из заметок. Сейчас в поле пример, замени на своих.</p>
+      <div class="row">
+        <button class="btn" id="shuffle">Перемешать</button>
+        <button class="btn danger" id="clearNames">Очистить</button>
+        <button class="btn" id="undoBtn" disabled>↶ Вернуть</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Номера</h2>
+      <div class="row">
+        <input type="number" id="from" value="1" min="0" aria-label="От">
+        <span class="hint">до</span>
+        <input type="number" id="to" value="30" min="0" aria-label="До">
+        <button class="btn" id="addNums">Заполнить</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Что разыгрываем</h2>
+      <input type="text" id="prize" placeholder="Например: сертификат на кофе">
+    </div>
+
+    <div class="sec">
+      <h2>Настройки</h2>
+      <label class="check"><input type="checkbox" id="autoRemove"> Убирать победителя из колеса</label>
+    </div>
+
+    <div class="sec">
+      <div class="sec-head"><h2>Победители</h2><button class="btn ghost danger" id="clearHist" style="padding:5px 10px;font-size:12px">Очистить</button></div>
+      <ul class="hist" id="hist"></ul>
+    </div>
+  </aside>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="winName">
+    <div class="eyebrow">ПОБЕДИТЕЛЬ</div>
+    <div class="winner" id="winName"></div>
+    <div class="prz" id="winPrize"></div>
+    <div class="actions">
+      <button class="btn primary" id="keepBtn">Отлично!</button>
+      <button class="btn" id="removeBtn">Убрать из колеса</button>
+      <button class="btn" id="againBtn">Крутить ещё</button>
+    </div>
+  </div>
+</div>
+<canvas id="fx"></canvas>
+<div class="fs-hint" id="fsHint" hidden>Двойной клик в любом месте — на весь экран</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const IS_SCREEN = location.hash === '#screen';
+let lastSeen = 0;
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem('ayuwheel_'+k); return v===null?d:JSON.parse(v);}catch(e){return d;} },
+  set(k, v){ if(IS_SCREEN) return; try{ localStorage.setItem('ayuwheel_'+k, JSON.stringify(v)); }catch(e){} }
+};
+const DEFAULT_LOGO = 'logo.png';
+const EXAMPLE = ['@aigerim.k','@timur_bsk','Команда «Мозгоштурм»','@dana.art','Команда «Знатоки»','@nurlan007','@alina_quiz','@beka.kg','Команда «Эрудиты»','@saule.m','@arsen_ready','@kamila.b'];
+const COLORS = ['#ff4d6d','#ffb020','#ffe45e','#2ecf8f','#2fb4ff','#7b61ff','#ff6ec7','#18c7c2'];
+
+const namesEl = $('names');
+let names = [];
+let rot = 0;                // текущий угол колеса
+let spinning = false;
+let winnerIdx = -1;
+let lastWinner = null;
+let soundOn = store.get('sound', true);
+let history = store.get('history', []);
+
+namesEl.value = store.get('names', EXAMPLE.join('\n'));
+$('prize').value = store.get('prize', '');
+$('autoRemove').checked = store.get('autoRemove', false);
+
+function parse(){
+  names = namesEl.value.split('\n').map(s => s.trim()).filter(Boolean);
+  $('count').textContent = names.length + ' ' + plural(names.length, ['участник','участника','участников']);
+  $('spin').disabled = names.length < 2 || spinning;
+  if($('undoBtn')) refreshUndo();
+  winnerIdx = -1;
+  draw();
+  if(typeof bus === 'function' && !IS_SCREEN) sendState();
+}
+function plural(n, f){ n=Math.abs(n)%100; const n1=n%10; if(n>10&&n<20) return f[2]; if(n1>1&&n1<5) return f[1]; if(n1===1) return f[0]; return f[2]; }
+let undo = store.get('undo', []);
+let typingBase = null, typingTimer = null;
+function pushUndo(prev){
+  if(prev === undefined || (undo.length && undo[undo.length-1] === prev)) { refreshUndo(); return; }
+  undo.push(prev); if(undo.length > 50) undo.shift(); store.set('undo', undo); refreshUndo();
+}
+function refreshUndo(){ $('undoBtn').disabled = !undo.length || spinning; }
+function setNames(v){ // любое изменение списка кнопками — с возможностью вернуть
+  if(v === namesEl.value) return;
+  pushUndo(namesEl.value); namesEl.value = v; lastSaved = v; store.set('names', v); parse();
+}
+let lastSaved = namesEl.value;
+namesEl.addEventListener('input', () => {
+  if(typingBase === null) typingBase = lastSaved;       // начало серии правок
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => { if(typingBase !== namesEl.value) pushUndo(typingBase); typingBase = null; }, 700);
+  store.set('names', namesEl.value); lastSaved = namesEl.value; parse();
+});
+$('undoBtn').onclick = () => {
+  if(spinning) return;
+  if(typingBase !== null){ clearTimeout(typingTimer); if(typingBase !== namesEl.value) pushUndo(typingBase); typingBase = null; }
+  if(!undo.length) return;
+  const v = undo.pop(); store.set('undo', undo);
+  namesEl.value = v; lastSaved = v; store.set('names', v); parse(); refreshUndo();
+};
+$('prize').addEventListener('input', e => { store.set('prize', e.target.value); updatePrize(); sendState(); });
+$('autoRemove').addEventListener('change', e => store.set('autoRemove', e.target.checked));
+function updatePrize(){ const p = $('prize').value.trim(); $('prizeLine').innerHTML = p ? 'Разыгрываем: <b></b>' : ''; if(p) $('prizeLine').querySelector('b').textContent = p; }
+
+$('shuffle').onclick = () => { if(spinning) return; const a = names.slice(); for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]];} setNames(a.join('\n')); };
+$('clearNames').onclick = () => { if(spinning) return; setNames(''); namesEl.focus(); };
+$('addNums').onclick = () => { if(spinning) return; let a=parseInt($('from').value,10), b=parseInt($('to').value,10); if(isNaN(a)||isNaN(b)) return; if(a>b)[a,b]=[b,a]; if(b-a>999) b=a+999; const arr=[]; for(let i=a;i<=b;i++) arr.push(String(i)); setNames(arr.join('\n')); };
+
+function rnd(n){ const u = new Uint32Array(1); crypto.getRandomValues(u); return u[0] % n; }
+function rndF(){ const u = new Uint32Array(1); crypto.getRandomValues(u); return u[0] / 4294967296; }
+
+/* ---------- логотип ---------- */
+function setLogo(src){
+  const hub = $('hub');
+  const old = hub.querySelector('img'); if(old) old.remove();
+  hub.classList.toggle('has-img', !!src);
+  if(src){ const img = new Image(); img.src = src; img.alt = 'Логотип квиза'; hub.appendChild(img); $('logoText').hidden = true; }
+  else $('logoText').hidden = false;
+}
+setLogo(DEFAULT_LOGO);
+
+/* ---------- колесо ---------- */
+const cv = $('wheel'), ctx = cv.getContext('2d'), wrap = $('wrap');
+let S = 600, dpr = 1, lightPhase = 0, lightMode = 'idle';
+function resize(){
+  dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  S = wrap.clientWidth; cv.width = S*dpr; cv.height = S*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); draw();
+}
+new ResizeObserver(resize).observe(wrap);
+
+function segColor(i, n){
+  let c = COLORS[i % COLORS.length];
+  if(i === n-1 && n > 1 && (n-1) % COLORS.length === 0) c = COLORS[(i+2) % COLORS.length];
+  return c;
+}
+function isLight(hex){ const n=parseInt(hex.slice(1),16); const r=n>>16,g=(n>>8)&255,b=n&255; return (0.299*r+0.587*g+0.114*b) > 150; }
+function fit(text, maxW){
+  if(ctx.measureText(text).width <= maxW) return text;
+  let t = text; while(t.length > 1 && ctx.measureText(t+'…').width > maxW) t = t.slice(0,-1);
+  return t + '…';
+}
+function draw(){
+  const c = S/2, R = S/2, r = R*0.885;
+  ctx.clearRect(0,0,S,S);
+  // внешний обод
+  let g = ctx.createRadialGradient(c,c,r*0.9,c,c,R);
+  g.addColorStop(0,'#3b2560'); g.addColorStop(.5,'#241640'); g.addColorStop(1,'#120a20');
+  ctx.beginPath(); ctx.arc(c,c,R*0.995,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+  ctx.lineWidth = R*0.012; ctx.strokeStyle = '#ffcf4a'; ctx.beginPath(); ctx.arc(c,c,R*0.985,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c,c,r+R*0.012,0,Math.PI*2); ctx.stroke();
+  // лампочки
+  const nb = 28;
+  for(let i=0;i<nb;i++){
+    const a = i/nb*Math.PI*2, x = c+Math.cos(a)*R*0.94, y = c+Math.sin(a)*R*0.94;
+    let on;
+    if(lightMode==='spin') on = (i + Math.floor(lightPhase)) % 3 === 0;
+    else if(lightMode==='win') on = Math.floor(lightPhase*2) % 2 === 0 ? i%2===0 : i%2===1;
+    else on = (i + Math.floor(lightPhase/3)) % 2 === 0;
+    const br = R*0.022;
+    if(on){ const lg = ctx.createRadialGradient(x,y,0,x,y,br*3); lg.addColorStop(0,'rgba(255,230,140,.9)'); lg.addColorStop(1,'rgba(255,200,60,0)'); ctx.fillStyle=lg; ctx.beginPath(); ctx.arc(x,y,br*3,0,Math.PI*2); ctx.fill(); }
+    ctx.beginPath(); ctx.arc(x,y,br,0,Math.PI*2); ctx.fillStyle = on ? '#fff6c8' : '#5a4378'; ctx.fill();
+  }
+  const n = names.length;
+  if(n === 0){
+    ctx.beginPath(); ctx.arc(c,c,r,0,Math.PI*2); ctx.fillStyle='#231836'; ctx.fill();
+    ctx.fillStyle='#a898c4'; ctx.font=`700 ${Math.max(12,S*0.03)}px Manrope, sans-serif`; ctx.textAlign='center';
+    ctx.fillText('Добавь участников', c, c+r*0.55); return;
+  }
+  const seg = Math.PI*2/n;
+  const fs = Math.max(0, Math.min(r*0.075, r*seg*0.52));
+  for(let i=0;i<n;i++){
+    const a0 = rot + i*seg, a1 = a0 + seg, col = segColor(i,n);
+    ctx.beginPath(); ctx.moveTo(c,c); ctx.arc(c,c,r,a0,a1); ctx.closePath();
+    const sg = ctx.createRadialGradient(c,c,r*0.2,c,c,r);
+    sg.addColorStop(0, shade(col,-0.25)); sg.addColorStop(.55, col); sg.addColorStop(1, shade(col,0.12));
+    ctx.fillStyle = sg; ctx.fill();
+    if(n <= 120){ ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=Math.max(0.6,S*0.002); ctx.stroke(); }
+    if(winnerIdx >= 0 && i !== winnerIdx){ ctx.fillStyle='rgba(10,5,20,.55)'; ctx.fill(); }
+    if(fs >= 7){
+      ctx.save(); ctx.translate(c,c); ctx.rotate(a0 + seg/2);
+      ctx.font = `700 ${fs*0.86}px Unbounded, Manrope, sans-serif`; ctx.textAlign='right'; ctx.textBaseline='middle';
+      const t = fit(names[i], r*0.62);
+      ctx.fillStyle = isLight(col) ? '#24122e' : '#ffffff';
+      if(!isLight(col)){ ctx.shadowColor='rgba(0,0,0,.35)'; ctx.shadowBlur=3; }
+      ctx.fillText(t, r*0.93, 0); ctx.restore();
+    }
+  }
+  if(winnerIdx >= 0){ // обводка сектора победителя
+    const a0 = rot + winnerIdx*seg;
+    ctx.beginPath(); ctx.moveTo(c,c); ctx.arc(c,c,r,a0,a0+seg); ctx.closePath();
+    ctx.lineWidth = S*0.008; ctx.strokeStyle='#fff6c8'; ctx.shadowColor='#ffcf4a'; ctx.shadowBlur=S*0.03; ctx.stroke(); ctx.shadowBlur=0;
+  }
+  // гвоздики по краю секторов
+  if(n <= 60) for(let i=0;i<n;i++){ const a = rot+i*seg; ctx.beginPath(); ctx.arc(c+Math.cos(a)*r*0.975, c+Math.sin(a)*r*0.975, S*0.006, 0, Math.PI*2); ctx.fillStyle='#fff3c4'; ctx.fill(); }
+  // тень к центру
+  const ig = ctx.createRadialGradient(c,c,r*0.1,c,c,r*0.32); ig.addColorStop(0,'rgba(0,0,0,.45)'); ig.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath(); ctx.arc(c,c,r*0.32,0,Math.PI*2); ctx.fillStyle=ig; ctx.fill();
+  // блик
+  const hl = ctx.createLinearGradient(0,c-r,0,c+r); hl.addColorStop(0,'rgba(255,255,255,.14)'); hl.addColorStop(.5,'rgba(255,255,255,0)');
+  ctx.beginPath(); ctx.arc(c,c,r,0,Math.PI*2); ctx.fillStyle=hl; ctx.fill();
+}
+function shade(hex, p){ const n=parseInt(hex.slice(1),16); let r=n>>16,g=(n>>8)&255,b=n&255;
+  const t = p<0?0:255, k=Math.abs(p); r=Math.round(r+(t-r)*k); g=Math.round(g+(t-g)*k); b=Math.round(b+(t-b)*k); return `rgb(${r},${g},${b})`; }
+
+// лампочки в покое
+let idleT = 0;
+(function idle(ts){ if(!spinning && lightMode!=='win' || lightMode==='win'){ if(!spinning){ if(ts-idleT>120){ idleT=ts; lightPhase+= (lightMode==='win'?0.5:1); draw(); } } } requestAnimationFrame(idle); })(0);
+
+/* ---------- звук ---------- */
+let ac = null;
+function audio(){ if(!ac){ try{ ac = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(ac && ac.state==='suspended') ac.resume(); return ac; }
+let lastTick = 0;
+function tick(speed){
+  if(!soundOn || !ac || muted()) return; const now = ac.currentTime; if(now - lastTick < 0.028) return; lastTick = now;
+  const o = ac.createOscillator(), gn = ac.createGain();
+  o.type='square'; o.frequency.setValueAtTime(1400 + Math.min(speed,1)*600, now); o.frequency.exponentialRampToValueAtTime(500, now+0.03);
+  gn.gain.setValueAtTime(0.08, now); gn.gain.exponentialRampToValueAtTime(0.0001, now+0.045);
+  o.connect(gn).connect(ac.destination); o.start(now); o.stop(now+0.05);
+}
+function muted(){ return IS_SCREEN; }
+function fanfare(){
+  if(!soundOn || !ac || muted()) return; const now = ac.currentTime;
+  const notes = [[523.25,0],[659.25,.12],[783.99,.24],[1046.5,.36],[783.99,.52],[1046.5,.62]];
+  notes.forEach(([f,t],i) => { ['triangle','sawtooth'].forEach((type,j) => {
+    const o = ac.createOscillator(), g = ac.createGain(); o.type=type; o.frequency.value=f*(j?1.005:1);
+    const d = i===notes.length-1 ? 0.9 : 0.2, v = j?0.03:0.12;
+    g.gain.setValueAtTime(0.0001, now+t); g.gain.exponentialRampToValueAtTime(v, now+t+0.02); g.gain.exponentialRampToValueAtTime(0.0001, now+t+d);
+    o.connect(g).connect(ac.destination); o.start(now+t); o.stop(now+t+d+0.05); }); });
+}
+$('soundBtn').textContent = 'Звук: ' + (soundOn?'вкл':'выкл');
+$('soundBtn').onclick = () => { soundOn=!soundOn; store.set('sound',soundOn); $('soundBtn').textContent='Звук: '+(soundOn?'вкл':'выкл'); audio(); };
+
+/* ---------- вращение ---------- */
+const TAU = Math.PI*2, POINTER = -Math.PI/2;
+const norm = a => ((a % TAU) + TAU) % TAU;
+function idxAt(angle){ const n=names.length; return Math.floor(norm(POINTER - angle) / (TAU/n)) % n; }
+const pointer = $('pointer');
+function kick(){ pointer.classList.add('kick'); pointer.style.transform='translateX(-50%) rotate(-22deg)'; requestAnimationFrame(()=>{ pointer.classList.remove('kick'); pointer.style.transform='translateX(-50%) rotate(0deg)'; }); }
+
+function spin(){
+  if(spinning || IS_SCREEN) return; parse(); if(names.length < 2) return;
+  const n = names.length, seg = TAU/n;
+  const win = rnd(n);
+  const jitter = 0.15 + rndF()*0.7;               // куда внутри сектора остановится
+  const target = POINTER - (win + jitter)*seg;
+  const dur = 10000;
+  const turns = Math.round(dur/1000*1.1) + 3;
+  const p = { start: rot, delta: norm(target - rot) + turns*TAU, win, dur };
+  bus({ type:'spin', p, text: namesEl.value, prize: $('prize').value });
+  runSpin(p);
+}
+function runSpin(p){
+  audio();
+  spinning = true; winnerIdx = -1; lightMode='spin';
+  $('spin').disabled = true; namesEl.disabled = true; refreshUndo(); wrap.classList.add('spinning');
+  const { start, delta, dur, win } = p, back = 0.18;
+  rot = start;
+  const t0 = performance.now();
+  let prev = idxAt(rot), prevRot = rot, prevT = t0;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function frame(now){
+    const t = Math.min(1, (now - t0)/dur);
+    const e = 1 - Math.pow(1 - t, 4);
+    const wind = t < 0.08 ? -back*Math.sin(Math.PI*t/0.08) : 0;  // замах назад перед стартом
+    rot = start + delta*e + wind;
+    const i = idxAt(rot);
+    if(i !== prev){ const sp = Math.abs(rot-prevRot)/Math.max(1,now-prevT)*16; tick(sp); if(!reduce) kick(); prev = i; }
+    prevRot = rot; prevT = now;
+    lightPhase += 0.25 + (1-t)*0.6;
+    draw();
+    if(t < 1) requestAnimationFrame(frame); else finish(win);
+  }
+  requestAnimationFrame(frame);
+}
+function finish(win){
+  spinning = false; winnerIdx = win; lightMode='win'; draw();
+  const name = names[win]; lastWinner = { name, idx: win };
+  const prize = $('prize').value.trim();
+  if(!IS_SCREEN){ history.unshift({ name, prize, time: Date.now() }); history = history.slice(0,100); store.set('history', history); renderHist(); }
+  fanfare();
+  const fl = document.createElement('div'); fl.className='flash'; document.body.appendChild(fl); setTimeout(()=>fl.remove(),1000);
+  confetti();
+  setTimeout(() => {
+    $('winName').textContent = name; $('winPrize').textContent = prize ? 'выигрывает: ' + prize : '';
+    $('removeBtn').hidden = $('autoRemove').checked;
+    $('modal').hidden = false; if(!IS_SCREEN) $('keepBtn').focus();
+  }, 650);
+}
+function closeModal(remove){
+  $('modal').hidden = true; lightMode='idle';
+  if((remove || $('autoRemove').checked) && lastWinner){
+    const arr = names.slice(); arr.splice(lastWinner.idx,1); pushUndo(namesEl.value); namesEl.value = arr.join('\n'); lastSaved = namesEl.value; store.set('names', namesEl.value);
+  }
+  namesEl.disabled = false; wrap.classList.remove('spinning'); lastWinner = null;
+  bus({ type:'close' }); parse();
+}
+$('keepBtn').onclick = () => closeModal(false);
+$('removeBtn').onclick = () => closeModal(true);
+$('againBtn').onclick = () => { closeModal(false); setTimeout(spin, 250); };
+$('modal').addEventListener('click', e => { if(e.target.id==='modal' && !IS_SCREEN) closeModal(false); });
+$('spin').onclick = spin; $('hub').onclick = spin;
+document.addEventListener('keydown', e => {
+  if(IS_SCREEN) return;
+  if(e.key==='Escape' && !$('modal').hidden) closeModal(false);
+  if((e.code==='Space'||e.key==='Enter') && document.activeElement===document.body && $('modal').hidden){ e.preventDefault(); spin(); }
+});
+
+/* ---------- история ---------- */
+function renderHist(){
+  const ul = $('hist'); ul.innerHTML='';
+  if(!history.length){ const li=document.createElement('li'); li.className='empty'; li.style.display='block'; li.textContent='Здесь появятся победители.'; ul.appendChild(li); return; }
+  history.forEach((h,i) => {
+    const li = document.createElement('li');
+    const d = new Date(h.time);
+    li.innerHTML = `<span class="n">${history.length-i}</span><span class="who"></span><span class="t">${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span>`;
+    const w = li.querySelector('.who'); w.textContent = h.name;
+    if(h.prize){ const s=document.createElement('small'); s.textContent=h.prize; w.appendChild(s); }
+    ul.appendChild(li);
+  });
+}
+$('clearHist').onclick = () => { history=[]; store.set('history',history); renderHist(); };
+
+/* ---------- режимы ---------- */
+$('hidePanel').onclick = () => { const on = $('app').classList.toggle('show'); $('hidePanel').textContent = on ? 'Показать пульт' : 'Скрыть пульт'; };
+
+/* ---------- трансляция на второй экран ---------- */
+let bc = null; try{ bc = new BroadcastChannel('ayuwheel'); }catch(e){}
+const seen = new Set();
+function bus(m){
+  m.id = Math.random().toString(36).slice(2) + Date.now(); m.from = IS_SCREEN ? 'screen' : 'ctrl';
+  try{ bc && bc.postMessage(m); }catch(e){}
+  try{ localStorage.setItem('ayuwheel_bus', JSON.stringify(m)); }catch(e){}
+}
+function onMsg(m){
+  if(!m || !m.id || seen.has(m.id) || m.from === (IS_SCREEN ? 'screen' : 'ctrl')) return;
+  seen.add(m.id); if(seen.size > 500) seen.clear();
+  if(IS_SCREEN){
+    if(m.type === 'state'){
+      if(spinning) return;
+      if(!$('modal').hidden) return;               // не сбиваем показ победителя
+      namesEl.value = m.text; parse(); rot = m.rot; setPrize(m.prize); draw();
+    } else if(m.type === 'spin'){
+      $('modal').hidden = true; namesEl.value = m.text; parse(); setPrize(m.prize); runSpin(m.p);
+    } else if(m.type === 'close'){
+      $('modal').hidden = true; lightMode = 'idle'; winnerIdx = -1; wrap.classList.remove('spinning'); draw();
+    }
+  } else {
+    if(m.type === 'hello' || m.type === 'ping'){
+      const was = Date.now() - lastSeen < 6000; lastSeen = Date.now(); liveUI();
+      if(m.type === 'hello' || !was) sendState();
+    }
+  }
+}
+if(bc) bc.onmessage = e => onMsg(e.data);
+addEventListener('storage', e => { if(e.key === 'ayuwheel_bus' && e.newValue){ try{ onMsg(JSON.parse(e.newValue)); }catch(_){} } });
+function sendState(){ if(!IS_SCREEN && !spinning) bus({ type:'state', text: namesEl.value, rot, prize: $('prize').value }); }
+function setPrize(v){ $('prize').value = v || ''; updatePrize(); }
+function liveUI(){ $('screenStatus').hidden = IS_SCREEN || Date.now() - lastSeen > 6000; }
+setInterval(liveUI, 1500);
+async function toggleFs(){ try{ if(document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }catch(e){} }
+if(IS_SCREEN){
+  document.body.classList.add('screen');
+  const hint = $('fsHint');
+  const syncFs = () => { hint.hidden = !!document.fullscreenElement; };
+  document.addEventListener('fullscreenchange', syncFs); syncFs();
+  // двойной клик в любом месте экрана — полный экран (и обратно)
+  let lastDown = 0;
+  document.addEventListener('pointerdown', e => {
+    const now = performance.now();
+    if(now - lastDown < 500){ lastDown = 0; toggleFs(); } else lastDown = now;
+  });
+  document.addEventListener('dblclick', e => e.preventDefault());
+  document.addEventListener('keydown', e => { if(e.key === 'f' || e.key === 'F') toggleFs(); });
+  let idleT; const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('idle'), 2500); };
+  addEventListener('mousemove', wake); wake();
+  bus({ type:'hello' });
+  setInterval(() => bus({ type:'ping' }), 2000);
+}
+let screenWin = null;
+function castMsg(t){ $('castMsg').textContent = t || ''; }
+async function openScreen(){
+  castMsg('');
+  const url = location.href.split('#')[0] + '#screen';
+  if(screenWin && !screenWin.closed){ screenWin.focus(); return; }
+  let target = null;
+  if('getScreenDetails' in window){
+    try{
+      const sd = await window.getScreenDetails();
+      target = sd.screens.find(s => s !== sd.currentScreen && !s.isPrimary) || sd.screens.find(s => s !== sd.currentScreen) || null;
+      if(!target) castMsg('Второй экран не найден. Подключи монитор или проектор и нажми ещё раз.');
+    }catch(e){ castMsg('Браузер не дал доступ к экранам. Разреши «Управление окнами» у значка замка в адресной строке и нажми снова.'); }
+  } else {
+    castMsg('Этот браузер не умеет выбирать экран сам. Открой сайт в Chrome или Edge — или перетащи окно на второй экран (Windows: Win + Shift + →).');
+  }
+  const feat = target
+    ? `popup,fullscreen,left=${target.availLeft},top=${target.availTop},width=${target.availWidth},height=${target.availHeight}`
+    : 'popup,width=1280,height=760';
+  screenWin = window.open(url, 'ayu_screen', feat);
+  if(!screenWin){ castMsg('Браузер заблокировал окно. Разреши всплывающие окна для этого сайта (значок справа в адресной строке) и нажми снова.'); return; }
+  if(target){ try{ screenWin.moveTo(target.availLeft, target.availTop); screenWin.resizeTo(target.availWidth, target.availHeight); }catch(e){} }
+  $('closeScreen').hidden = false;
+}
+$('showMode').onclick = openScreen;
+$('closeScreen').onclick = () => { try{ screenWin && screenWin.close(); }catch(e){} screenWin = null; $('closeScreen').hidden = true; };
+setInterval(() => { if(screenWin && screenWin.closed){ screenWin = null; $('closeScreen').hidden = true; } }, 1500);
+$('fsBtn').onclick = async () => { try{ if(document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }catch(e){ $('fsBtn').textContent='Недоступно здесь'; } };
+
+/* ---------- конфетти ---------- */
+const fx = $('fx'), fctx = fx.getContext('2d'); let parts = [], fxRun = false;
+function sizeFx(){ fx.width = innerWidth*dpr; fx.height = innerHeight*dpr; fctx.setTransform(dpr,0,0,dpr,0,0); }
+addEventListener('resize', sizeFx); sizeFx();
+function confetti(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  sizeFx();
+  const rct = wrap.getBoundingClientRect(), cx = rct.left+rct.width/2, cy = rct.top+rct.height/2;
+  const cols = COLORS.concat(['#ffffff','#ffcf4a']);
+  for(let i=0;i<220;i++){ const a = rndF()*TAU, s = 6+rndF()*12;
+    parts.push({x:cx,y:cy,vx:Math.cos(a)*s,vy:Math.sin(a)*s-6,w:6+rndF()*8,h:4+rndF()*6,r:rndF()*TAU,vr:(rndF()-.5)*.4,c:cols[rnd(cols.length)],life:0,shape:rnd(3)}); }
+  for(let k=0;k<2;k++) for(let i=0;i<90;i++){ const fromL = k===0;
+    parts.push({x:fromL?-10:innerWidth+10,y:innerHeight*0.85,vx:(fromL?1:-1)*(8+rndF()*12),vy:-(12+rndF()*14),w:6+rndF()*8,h:4+rndF()*6,r:rndF()*TAU,vr:(rndF()-.5)*.4,c:cols[rnd(cols.length)],life:0,shape:rnd(3)}); }
+  if(!fxRun){ fxRun = true; requestAnimationFrame(fxLoop); }
+}
+function fxLoop(){
+  fctx.clearRect(0,0,innerWidth,innerHeight);
+  parts = parts.filter(p => p.y < innerHeight+40 && p.life < 420);
+  for(const p of parts){
+    p.life++; p.vy += 0.32; p.vx *= 0.985; p.vy *= 0.985; p.x += p.vx; p.y += p.vy; p.r += p.vr;
+    fctx.save(); fctx.translate(p.x,p.y); fctx.rotate(p.r); fctx.scale(1, Math.cos(p.life*0.15));
+    fctx.fillStyle = p.c;
+    if(p.shape===0) fctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+    else if(p.shape===1){ fctx.beginPath(); fctx.arc(0,0,p.h/1.6,0,TAU); fctx.fill(); }
+    else { fctx.beginPath(); fctx.moveTo(0,-p.h); fctx.lineTo(p.w/2,p.h/2); fctx.lineTo(-p.w/2,p.h/2); fctx.closePath(); fctx.fill(); }
+    fctx.restore();
+  }
+  if(parts.length) requestAnimationFrame(fxLoop); else { fxRun=false; fctx.clearRect(0,0,innerWidth,innerHeight); }
+}
+
+updatePrize(); renderHist(); parse();
+if(document.fonts){ document.fonts.load('700 24px Unbounded').then(draw, draw); document.fonts.ready.then(draw); }
+})();
+</script>
+</body>
+</html>
