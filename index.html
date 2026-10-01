@@ -112,6 +112,11 @@ body.screen .wheel-wrap{width:min(100%,calc(100vh - 20vh - 60px))}
 body.screen .hub{cursor:default}
 body.screen .brand h1{font-size:clamp(28px,5vh,60px)}
 body.screen .prize-line{font-size:clamp(16px,2.6vh,28px)}
+.sync{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:var(--muted)}
+.sync::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.sync[data-state="ok"]{color:#3ee08f}.sync[data-state="ok"]::before{background:#3ee08f;box-shadow:0 0 8px #3ee08f}
+.sync[data-state="saving"]::before{background:var(--gold)}
+.sync[data-state="off"]{color:var(--hot)}.sync[data-state="off"]::before{background:var(--hot)}
 .cast-hint{margin:0;text-align:center;max-width:46ch}
 .live{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#3ee08f}
 .live::before{content:"";width:8px;height:8px;border-radius:50%;background:#3ee08f;box-shadow:0 0 8px #3ee08f}
@@ -152,14 +157,15 @@ body.screen.idle,body.screen.idle *{cursor:none!important}
       <span class="live" id="screenStatus" hidden>Экран трансляции подключён</span>
     </div>
     <p class="cast-msg" id="castMsg"></p>
-    <p class="hint cast-hint">«Режим показа» сам откроет колесо во весь экран на втором мониторе (Chrome или Edge). В первый раз браузер спросит разрешение на управление окнами — нажми «Разрешить». Крутишь отсюда.</p>
+    <p class="hint cast-hint">«Режим показа» сам откроет колесо во весь экран на втором мониторе (Chrome или Edge). В первый раз браузер спросит разрешение на управление окнами — нажми «Разрешить». Крутить можно отсюда или с телефона: колесо закрутится на всех открытых экранах.</p>
   </section>
 
   <aside class="panel">
+    <div class="sync" id="sync" data-state="wait">Подключение…</div>
     <div class="sec">
       <div class="sec-head"><h2>Участники</h2><span class="count" id="count">0</span></div>
       <textarea id="names" spellcheck="false" placeholder="Каждый участник с новой строки"></textarea>
-      <p class="hint">Никнеймы, номера или команды, по одному на строку. Можно вставить списком из заметок. Сейчас в поле пример, замени на своих.</p>
+      <p class="hint">Никнеймы, номера или команды, по одному на строку. Список общий: вбил на телефоне — сразу появилось на компьютере и наоборот.</p>
       <div class="row">
         <button class="btn" id="shuffle">Перемешать</button>
         <button class="btn danger" id="clearNames">Очистить</button>
@@ -213,70 +219,155 @@ body.screen.idle,body.screen.idle *{cursor:none!important}
 (() => {
 const $ = id => document.getElementById(id);
 const IS_SCREEN = location.hash === '#screen';
-let lastSeen = 0;
+const ME = Math.random().toString(36).slice(2, 10) + Date.now().toString(36); // эта вкладка
 const store = {
   get(k, d){ try{ const v = localStorage.getItem('ayuwheel_'+k); return v===null?d:JSON.parse(v);}catch(e){return d;} },
-  set(k, v){ if(IS_SCREEN) return; try{ localStorage.setItem('ayuwheel_'+k, JSON.stringify(v)); }catch(e){} }
+  set(k, v){ try{ localStorage.setItem('ayuwheel_'+k, JSON.stringify(v)); }catch(e){} }
 };
 const DEFAULT_LOGO = 'logo.png';
-const EXAMPLE = ['@aigerim.k','@timur_bsk','Команда «Мозгоштурм»','@dana.art','Команда «Знатоки»','@nurlan007','@alina_quiz','@beka.kg','Команда «Эрудиты»','@saule.m','@arsen_ready','@kamila.b'];
 const COLORS = ['#ff4d6d','#ffb020','#ffe45e','#2ecf8f','#2fb4ff','#7b61ff','#ff6ec7','#18c7c2'];
+let screenWin = null;
+
+/* ---------- общие данные: сервер + копия на устройстве ---------- */
+const EMPTY = () => ({ names:'', prize:'', autoRemove:false, history:[], undo:[], updatedAt:0 });
+function clean(d){
+  const e = EMPTY(); if(!d || typeof d !== 'object') return e;
+  return {
+    names: typeof d.names === 'string' ? d.names : '',
+    prize: typeof d.prize === 'string' ? d.prize : '',
+    autoRemove: !!d.autoRemove,
+    history: Array.isArray(d.history) ? d.history : [],
+    undo: Array.isArray(d.undo) ? d.undo : [],
+    updatedAt: Number(d.updatedAt) || 0,
+  };
+}
+let D = clean(store.get('backup', null));        // копия на этом устройстве
+const hasData = d => !!(d.names.trim() || d.prize.trim() || d.history.length);
 
 const namesEl = $('names');
 let names = [];
-let rot = 0;                // текущий угол колеса
+let rot = 0;
 let spinning = false;
 let winnerIdx = -1;
 let lastWinner = null;
 let soundOn = store.get('sound', true);
-let history = store.get('history', []);
 
-namesEl.value = store.get('names', EXAMPLE.join('\n'));
-$('prize').value = store.get('prize', '');
-$('autoRemove').checked = store.get('autoRemove', false);
+function saveLocal(){ if(!IS_SCREEN) store.set('backup', D); }
+
+/* синхронизация */
+let knownRev = -1, bootId = null, online = false, pushTimer = null, pushing = false, dirty = false;
+function setSync(state){
+  const el = $('sync'); if(!el) return;
+  el.dataset.state = state;
+  el.textContent = state === 'ok' ? 'Синхронизировано' : state === 'saving' ? 'Сохраняю…' : state === 'off' ? 'Нет связи — сохраню, когда появится' : 'Подключение…';
+}
+function commit(){
+  D.updatedAt = Date.now(); saveLocal(); dirty = true; setSync('saving');
+  clearTimeout(pushTimer); pushTimer = setTimeout(push, 250);
+}
+async function push(){
+  if(IS_SCREEN) return;
+  if(pushing){ clearTimeout(pushTimer); pushTimer = setTimeout(push, 300); return; }
+  pushing = true; dirty = false;
+  try{
+    const r = await fetch('api/state', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ data: D, by: ME }) });
+    if(!r.ok) throw new Error('http ' + r.status);
+    const j = await r.json(); if(j.rev > knownRev) knownRev = j.rev;
+    if(!dirty) setSync('ok');
+  }catch(e){ dirty = true; setSync('off'); clearTimeout(pushTimer); pushTimer = setTimeout(push, 2500); }
+  pushing = false;
+}
+async function restore(){
+  try{
+    await fetch('api/state', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ data: D, by: ME, restore: true }) });
+  }catch(e){ setTimeout(restore, 2500); }
+}
+async function cast(msg){
+  msg.by = ME;
+  try{ await fetch('api/cast', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(msg) }); }catch(e){}
+}
+let pendingState = null;
+function applyRemote(data){
+  if(spinning || winnerIdx >= 0 || !$('modal').hidden){ pendingState = data; return; }
+  pendingState = null;
+  D = clean(data); saveLocal(); applyToUI();
+}
+function connect(){
+  const es = new EventSource('api/events');
+  es.onopen = () => { online = true; if(!dirty) setSync('ok'); };
+  es.onerror = () => { online = false; setSync('off'); };
+  es.onmessage = ev => {
+    let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
+    if(m.type === 'state'){
+      const s = m.state;
+      if(s.boot !== bootId){ bootId = s.boot; knownRev = -1; }
+      if(s.fresh){
+        // сервер проснулся пустым — возвращаем данные с этого устройства
+        if(!IS_SCREEN && hasData(D)) { restore(); return; }
+      }
+      if(s.rev <= knownRev) return;
+      knownRev = s.rev;
+      if(m.by === ME) return;                       // своё же изменение
+      if(dirty && !IS_SCREEN) return;               // у нас есть несохранённые правки — они важнее
+      applyRemote(s.data);
+    } else if(m.by !== ME){
+      if(m.type === 'spin') remoteSpin(m);
+      else if(m.type === 'close') closeModal(false, true);
+    }
+  };
+}
+
+function applyToUI(){
+  if(namesEl.value !== D.names){
+    const focused = document.activeElement === namesEl, a = namesEl.selectionStart, b = namesEl.selectionEnd;
+    namesEl.value = D.names;
+    if(focused){ try{ namesEl.setSelectionRange(Math.min(a, D.names.length), Math.min(b, D.names.length)); }catch(e){} }
+  }
+  if($('prize').value !== D.prize) $('prize').value = D.prize;
+  $('autoRemove').checked = D.autoRemove;
+  updatePrize(); renderHist(); parse();
+}
 
 function parse(){
-  names = namesEl.value.split('\n').map(s => s.trim()).filter(Boolean);
+  names = D.names.split('\n').map(s => s.trim()).filter(Boolean);
   $('count').textContent = names.length + ' ' + plural(names.length, ['участник','участника','участников']);
   $('spin').disabled = names.length < 2 || spinning;
-  if($('undoBtn')) refreshUndo();
+  refreshUndo();
   winnerIdx = -1;
   draw();
-  if(typeof bus === 'function' && !IS_SCREEN) sendState();
 }
 function plural(n, f){ n=Math.abs(n)%100; const n1=n%10; if(n>10&&n<20) return f[2]; if(n1>1&&n1<5) return f[1]; if(n1===1) return f[0]; return f[2]; }
-let undo = store.get('undo', []);
+
+/* отмена */
 let typingBase = null, typingTimer = null;
 function pushUndo(prev){
-  if(prev === undefined || (undo.length && undo[undo.length-1] === prev)) { refreshUndo(); return; }
-  undo.push(prev); if(undo.length > 50) undo.shift(); store.set('undo', undo); refreshUndo();
+  if(prev === undefined || (D.undo.length && D.undo[D.undo.length-1] === prev)) return;
+  D.undo.push(prev); if(D.undo.length > 30) D.undo.shift();
 }
-function refreshUndo(){ $('undoBtn').disabled = !undo.length || spinning; }
-function setNames(v){ // любое изменение списка кнопками — с возможностью вернуть
-  if(v === namesEl.value) return;
-  pushUndo(namesEl.value); namesEl.value = v; lastSaved = v; store.set('names', v); parse();
+function refreshUndo(){ $('undoBtn').disabled = !D.undo.length || spinning; }
+function setNames(v){
+  if(v === D.names) return;
+  pushUndo(D.names); D.names = v; namesEl.value = v; parse(); commit();
 }
-let lastSaved = namesEl.value;
 namesEl.addEventListener('input', () => {
-  if(typingBase === null) typingBase = lastSaved;       // начало серии правок
+  if(typingBase === null) typingBase = D.names;
   clearTimeout(typingTimer);
-  typingTimer = setTimeout(() => { if(typingBase !== namesEl.value) pushUndo(typingBase); typingBase = null; }, 700);
-  store.set('names', namesEl.value); lastSaved = namesEl.value; parse();
+  typingTimer = setTimeout(() => { if(typingBase !== D.names){ pushUndo(typingBase); refreshUndo(); commit(); } typingBase = null; }, 700);
+  D.names = namesEl.value; parse(); commit();
 });
+function flushTyping(){ if(typingBase !== null){ clearTimeout(typingTimer); if(typingBase !== D.names) pushUndo(typingBase); typingBase = null; } }
 $('undoBtn').onclick = () => {
-  if(spinning) return;
-  if(typingBase !== null){ clearTimeout(typingTimer); if(typingBase !== namesEl.value) pushUndo(typingBase); typingBase = null; }
-  if(!undo.length) return;
-  const v = undo.pop(); store.set('undo', undo);
-  namesEl.value = v; lastSaved = v; store.set('names', v); parse(); refreshUndo();
+  if(spinning) return; flushTyping();
+  if(!D.undo.length) return;
+  D.names = D.undo.pop(); namesEl.value = D.names; parse(); commit();
 };
-$('prize').addEventListener('input', e => { store.set('prize', e.target.value); updatePrize(); sendState(); });
-$('autoRemove').addEventListener('change', e => store.set('autoRemove', e.target.checked));
-function updatePrize(){ const p = $('prize').value.trim(); $('prizeLine').innerHTML = p ? 'Разыгрываем: <b></b>' : ''; if(p) $('prizeLine').querySelector('b').textContent = p; }
+$('prize').addEventListener('input', e => { D.prize = e.target.value; updatePrize(); commit(); });
+$('autoRemove').addEventListener('change', e => { D.autoRemove = e.target.checked; commit(); });
+function updatePrize(){ const p = D.prize.trim(); $('prizeLine').innerHTML = p ? 'Разыгрываем: <b></b>' : ''; if(p) $('prizeLine').querySelector('b').textContent = p; }
 
-$('shuffle').onclick = () => { if(spinning) return; const a = names.slice(); for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]];} setNames(a.join('\n')); };
-$('clearNames').onclick = () => { if(spinning) return; setNames(''); namesEl.focus(); };
-$('addNums').onclick = () => { if(spinning) return; let a=parseInt($('from').value,10), b=parseInt($('to').value,10); if(isNaN(a)||isNaN(b)) return; if(a>b)[a,b]=[b,a]; if(b-a>999) b=a+999; const arr=[]; for(let i=a;i<=b;i++) arr.push(String(i)); setNames(arr.join('\n')); };
+$('shuffle').onclick = () => { if(spinning) return; flushTyping(); const a = names.slice(); for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]];} setNames(a.join('\n')); };
+$('clearNames').onclick = () => { if(spinning) return; flushTyping(); setNames(''); namesEl.focus(); };
+$('addNums').onclick = () => { if(spinning) return; flushTyping(); let a=parseInt($('from').value,10), b=parseInt($('to').value,10); if(isNaN(a)||isNaN(b)) return; if(a>b)[a,b]=[b,a]; if(b-a>999) b=a+999; const arr=[]; for(let i=a;i<=b;i++) arr.push(String(i)); setNames(arr.join('\n')); };
 
 function rnd(n){ const u = new Uint32Array(1); crypto.getRandomValues(u); return u[0] % n; }
 function rndF(){ const u = new Uint32Array(1); crypto.getRandomValues(u); return u[0] / 4294967296; }
@@ -389,7 +480,7 @@ function tick(speed){
   gn.gain.setValueAtTime(0.08, now); gn.gain.exponentialRampToValueAtTime(0.0001, now+0.045);
   o.connect(gn).connect(ac.destination); o.start(now); o.stop(now+0.05);
 }
-function muted(){ return IS_SCREEN; }
+function muted(){ return !IS_SCREEN && !!screenWin && !screenWin.closed; }
 function fanfare(){
   if(!soundOn || !ac || muted()) return; const now = ac.currentTime;
   const notes = [[523.25,0],[659.25,.12],[783.99,.24],[1046.5,.36],[783.99,.52],[1046.5,.62]];
@@ -410,18 +501,28 @@ const pointer = $('pointer');
 function kick(){ pointer.classList.add('kick'); pointer.style.transform='translateX(-50%) rotate(-22deg)'; requestAnimationFrame(()=>{ pointer.classList.remove('kick'); pointer.style.transform='translateX(-50%) rotate(0deg)'; }); }
 
 function spin(){
-  if(spinning || IS_SCREEN) return; parse(); if(names.length < 2) return;
+  if(spinning || IS_SCREEN) return;
+  flushTyping(); parse(); if(names.length < 2) return;
+  if(!$('modal').hidden) closeModal(false);
   const n = names.length, seg = TAU/n;
   const win = rnd(n);
-  const jitter = 0.15 + rndF()*0.7;               // куда внутри сектора остановится
+  const jitter = 0.15 + rndF()*0.7;
   const target = POINTER - (win + jitter)*seg;
   const dur = 10000;
   const turns = Math.round(dur/1000*1.1) + 3;
   const p = { start: rot, delta: norm(target - rot) + turns*TAU, win, dur };
-  bus({ type:'spin', p, text: namesEl.value, prize: $('prize').value });
-  runSpin(p);
+  cast({ type:'spin', p, names: D.names, prize: D.prize });
+  runSpin(p, true);
 }
-function runSpin(p){
+function remoteSpin(m){
+  if(spinning) return;
+  $('modal').hidden = true;
+  if(typeof m.names === 'string' && m.names !== D.names){ D.names = m.names; namesEl.value = m.names; }
+  if(typeof m.prize === 'string'){ D.prize = m.prize; $('prize').value = m.prize; updatePrize(); }
+  parse();
+  runSpin(m.p, false);
+}
+function runSpin(p, mine){
   audio();
   spinning = true; winnerIdx = -1; lightMode='spin';
   $('spin').disabled = true; namesEl.disabled = true; refreshUndo(); wrap.classList.add('spinning');
@@ -433,38 +534,46 @@ function runSpin(p){
   function frame(now){
     const t = Math.min(1, (now - t0)/dur);
     const e = 1 - Math.pow(1 - t, 4);
-    const wind = t < 0.08 ? -back*Math.sin(Math.PI*t/0.08) : 0;  // замах назад перед стартом
+    const wind = t < 0.08 ? -back*Math.sin(Math.PI*t/0.08) : 0;
     rot = start + delta*e + wind;
     const i = idxAt(rot);
     if(i !== prev){ const sp = Math.abs(rot-prevRot)/Math.max(1,now-prevT)*16; tick(sp); if(!reduce) kick(); prev = i; }
     prevRot = rot; prevT = now;
     lightPhase += 0.25 + (1-t)*0.6;
     draw();
-    if(t < 1) requestAnimationFrame(frame); else finish(win);
+    if(t < 1) requestAnimationFrame(frame); else finish(win, mine);
   }
   requestAnimationFrame(frame);
 }
-function finish(win){
+function finish(win, mine){
   spinning = false; winnerIdx = win; lightMode='win'; draw();
-  const name = names[win]; lastWinner = { name, idx: win };
-  const prize = $('prize').value.trim();
-  if(!IS_SCREEN){ history.unshift({ name, prize, time: Date.now() }); history = history.slice(0,100); store.set('history', history); renderHist(); }
+  const name = names[win]; lastWinner = { name, idx: win, names: D.names };
+  const prize = D.prize.trim();
+  if(mine){ D.history.unshift({ name, prize, time: Date.now() }); D.history = D.history.slice(0,100); renderHist(); commit(); }
   fanfare();
   const fl = document.createElement('div'); fl.className='flash'; document.body.appendChild(fl); setTimeout(()=>fl.remove(),1000);
   confetti();
   setTimeout(() => {
+    if(winnerIdx !== win) return;
     $('winName').textContent = name; $('winPrize').textContent = prize ? 'выигрывает: ' + prize : '';
-    $('removeBtn').hidden = $('autoRemove').checked;
+    $('removeBtn').hidden = D.autoRemove;
     $('modal').hidden = false; if(!IS_SCREEN) $('keepBtn').focus();
   }, 650);
 }
-function closeModal(remove){
+// remote = закрыли на другом устройстве: просто прячем карточку, список меняет тот, кто нажал
+function closeModal(remove, remote){
+  const wasOpen = !$('modal').hidden || winnerIdx >= 0;
   $('modal').hidden = true; lightMode='idle';
-  if((remove || $('autoRemove').checked) && lastWinner){
-    const arr = names.slice(); arr.splice(lastWinner.idx,1); pushUndo(namesEl.value); namesEl.value = arr.join('\n'); lastSaved = namesEl.value; store.set('names', namesEl.value);
+  namesEl.disabled = false; wrap.classList.remove('spinning');
+  // сначала догоняем изменения, пришедшие с других устройств, пока показывали победителя
+  if(pendingState){ D = clean(pendingState); pendingState = null; saveLocal(); applyToUI(); }
+  if(!remote && !IS_SCREEN && (remove || D.autoRemove) && lastWinner && lastWinner.names === D.names){
+    const arr = names.slice(); arr.splice(lastWinner.idx,1);
+    pushUndo(D.names); D.names = arr.join('\n'); namesEl.value = D.names; commit();
   }
-  namesEl.disabled = false; wrap.classList.remove('spinning'); lastWinner = null;
-  bus({ type:'close' }); parse();
+  lastWinner = null;
+  if(!remote && wasOpen) cast({ type:'close' });
+  parse();
 }
 $('keepBtn').onclick = () => closeModal(false);
 $('removeBtn').onclick = () => closeModal(true);
@@ -480,75 +589,25 @@ document.addEventListener('keydown', e => {
 /* ---------- история ---------- */
 function renderHist(){
   const ul = $('hist'); ul.innerHTML='';
+  const history = D.history;
   if(!history.length){ const li=document.createElement('li'); li.className='empty'; li.style.display='block'; li.textContent='Здесь появятся победители.'; ul.appendChild(li); return; }
   history.forEach((h,i) => {
     const li = document.createElement('li');
     const d = new Date(h.time);
-    li.innerHTML = `<span class="n">${history.length-i}</span><span class="who"></span><span class="t">${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span>`;
+    li.innerHTML = `<span class="n">${history.length-i}</span><span class="who"></span><span class="t">${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span>`;
     const w = li.querySelector('.who'); w.textContent = h.name;
     if(h.prize){ const s=document.createElement('small'); s.textContent=h.prize; w.appendChild(s); }
     ul.appendChild(li);
   });
 }
-$('clearHist').onclick = () => { history=[]; store.set('history',history); renderHist(); };
+$('clearHist').onclick = () => { D.history = []; renderHist(); commit(); };
 
 /* ---------- режимы ---------- */
 $('hidePanel').onclick = () => { const on = $('app').classList.toggle('show'); $('hidePanel').textContent = on ? 'Показать пульт' : 'Скрыть пульт'; };
-
-/* ---------- трансляция на второй экран ---------- */
-let bc = null; try{ bc = new BroadcastChannel('ayuwheel'); }catch(e){}
-const seen = new Set();
-function bus(m){
-  m.id = Math.random().toString(36).slice(2) + Date.now(); m.from = IS_SCREEN ? 'screen' : 'ctrl';
-  try{ bc && bc.postMessage(m); }catch(e){}
-  try{ localStorage.setItem('ayuwheel_bus', JSON.stringify(m)); }catch(e){}
-}
-function onMsg(m){
-  if(!m || !m.id || seen.has(m.id) || m.from === (IS_SCREEN ? 'screen' : 'ctrl')) return;
-  seen.add(m.id); if(seen.size > 500) seen.clear();
-  if(IS_SCREEN){
-    if(m.type === 'state'){
-      if(spinning) return;
-      if(!$('modal').hidden) return;               // не сбиваем показ победителя
-      namesEl.value = m.text; parse(); rot = m.rot; setPrize(m.prize); draw();
-    } else if(m.type === 'spin'){
-      $('modal').hidden = true; namesEl.value = m.text; parse(); setPrize(m.prize); runSpin(m.p);
-    } else if(m.type === 'close'){
-      $('modal').hidden = true; lightMode = 'idle'; winnerIdx = -1; wrap.classList.remove('spinning'); draw();
-    }
-  } else {
-    if(m.type === 'hello' || m.type === 'ping'){
-      const was = Date.now() - lastSeen < 6000; lastSeen = Date.now(); liveUI();
-      if(m.type === 'hello' || !was) sendState();
-    }
-  }
-}
-if(bc) bc.onmessage = e => onMsg(e.data);
-addEventListener('storage', e => { if(e.key === 'ayuwheel_bus' && e.newValue){ try{ onMsg(JSON.parse(e.newValue)); }catch(_){} } });
-function sendState(){ if(!IS_SCREEN && !spinning) bus({ type:'state', text: namesEl.value, rot, prize: $('prize').value }); }
-function setPrize(v){ $('prize').value = v || ''; updatePrize(); }
-function liveUI(){ $('screenStatus').hidden = IS_SCREEN || Date.now() - lastSeen > 6000; }
-setInterval(liveUI, 1500);
 async function toggleFs(){ try{ if(document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }catch(e){} }
-if(IS_SCREEN){
-  document.body.classList.add('screen');
-  const hint = $('fsHint');
-  const syncFs = () => { hint.hidden = !!document.fullscreenElement; };
-  document.addEventListener('fullscreenchange', syncFs); syncFs();
-  // двойной клик в любом месте экрана — полный экран (и обратно)
-  let lastDown = 0;
-  document.addEventListener('pointerdown', e => {
-    const now = performance.now();
-    if(now - lastDown < 500){ lastDown = 0; toggleFs(); } else lastDown = now;
-  });
-  document.addEventListener('dblclick', e => e.preventDefault());
-  document.addEventListener('keydown', e => { if(e.key === 'f' || e.key === 'F') toggleFs(); });
-  let idleT; const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('idle'), 2500); };
-  addEventListener('mousemove', wake); wake();
-  bus({ type:'hello' });
-  setInterval(() => bus({ type:'ping' }), 2000);
-}
-let screenWin = null;
+$('fsBtn').onclick = toggleFs;
+
+/* ---------- второй экран ---------- */
 function castMsg(t){ $('castMsg').textContent = t || ''; }
 async function openScreen(){
   castMsg('');
@@ -562,7 +621,7 @@ async function openScreen(){
       if(!target) castMsg('Второй экран не найден. Подключи монитор или проектор и нажми ещё раз.');
     }catch(e){ castMsg('Браузер не дал доступ к экранам. Разреши «Управление окнами» у значка замка в адресной строке и нажми снова.'); }
   } else {
-    castMsg('Этот браузер не умеет выбирать экран сам. Открой сайт в Chrome или Edge — или перетащи окно на второй экран (Windows: Win + Shift + →).');
+    castMsg('Этот браузер не умеет выбирать экран сам. Открой сайт в Chrome или Edge или перетащи окно на второй экран (Windows: Win + Shift + →).');
   }
   const feat = target
     ? `popup,fullscreen,left=${target.availLeft},top=${target.availTop},width=${target.availWidth},height=${target.availHeight}`
@@ -575,7 +634,23 @@ async function openScreen(){
 $('showMode').onclick = openScreen;
 $('closeScreen').onclick = () => { try{ screenWin && screenWin.close(); }catch(e){} screenWin = null; $('closeScreen').hidden = true; };
 setInterval(() => { if(screenWin && screenWin.closed){ screenWin = null; $('closeScreen').hidden = true; } }, 1500);
-$('fsBtn').onclick = async () => { try{ if(document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }catch(e){ $('fsBtn').textContent='Недоступно здесь'; } };
+
+if(IS_SCREEN){
+  document.body.classList.add('screen');
+  const hint = $('fsHint');
+  const syncFs = () => { hint.hidden = !!document.fullscreenElement; };
+  document.addEventListener('fullscreenchange', syncFs); syncFs();
+  let lastDown = 0;
+  document.addEventListener('pointerdown', () => {
+    audio();
+    const now = performance.now();
+    if(now - lastDown < 500){ lastDown = 0; toggleFs(); } else lastDown = now;
+  });
+  document.addEventListener('dblclick', e => e.preventDefault());
+  document.addEventListener('keydown', e => { audio(); if(e.key === 'f' || e.key === 'F') toggleFs(); });
+  let idleT; const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('idle'), 2500); };
+  addEventListener('mousemove', wake); wake();
+}
 
 /* ---------- конфетти ---------- */
 const fx = $('fx'), fctx = fx.getContext('2d'); let parts = [], fxRun = false;
@@ -607,7 +682,9 @@ function fxLoop(){
   if(parts.length) requestAnimationFrame(fxLoop); else { fxRun=false; fctx.clearRect(0,0,innerWidth,innerHeight); }
 }
 
-updatePrize(); renderHist(); parse();
+connect();
+applyToUI();
+setSync('wait');
 if(document.fonts){ document.fonts.load('700 24px Unbounded').then(draw, draw); document.fonts.ready.then(draw); }
 })();
 </script>

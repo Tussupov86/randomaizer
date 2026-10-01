@@ -1,0 +1,10 @@
+{
+  "name": "ayu-wheel",
+  "version": "1.0.0",
+  "description": "Колесо АЮ READY КВИЗ — розыгрыши с общей синхронизацией",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "license": "UNLICENSED",
+  "private": true
+}
