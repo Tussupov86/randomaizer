@@ -65,7 +65,10 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && STATIC[url.pathname]) {
     const [file, type] = STATIC[url.pathname];
-    return fs.readFile(path.join(__dirname, file), (err, buf) => err ? send(res, 404, 'Not found', 'text/plain') : send(res, 200, buf, type));
+    // файл может лежать рядом с server.js или в папке public
+    const p = [path.join(__dirname, file), path.join(__dirname, 'public', file)].find(f => fs.existsSync(f));
+    if (!p) return send(res, 404, 'Не найден файл ' + file + ' (положи его рядом с server.js)', 'text/plain; charset=utf-8');
+    return fs.readFile(p, (err, buf) => err ? send(res, 500, 'Ошибка чтения', 'text/plain; charset=utf-8') : send(res, 200, buf, type));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, publicState());
